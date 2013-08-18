@@ -11,6 +11,7 @@
 #include "lpm.h"
 #include "hwtimer.h"
 
+/* Comment it to disable RTC automatic calibration */
 #define RTC_AUTO_CALIB
 
 static enum lpm_mode lpm;
@@ -31,6 +32,10 @@ void RTC_WKUP_IRQHandler(void)
 {
     if (RTC_GetITStatus(RTC_IT_WUT) != RESET) {
 #ifdef RTC_AUTO_CALIB
+        /*
+         * Sychronize RTC tick with Timer 2 by adjusting Synchronous Prescaler
+         * until errors are below RTC_CALIB_THRESHOLD three times in succession.
+         */
         if (!lpm_initialized) {
             uint32_t delta;
             int error;
@@ -43,7 +48,10 @@ void RTC_WKUP_IRQHandler(void)
             if (error > RTC_CALIB_THRESHOLD || error < -RTC_CALIB_THRESHOLD) {
                 int old_rtc_synch_prediv = rtc_synch_prediv;
 
-                /* Filter undesired duration */
+                /*
+                 * Filter undesired measurement result delayed by other
+                 * interrupt handler
+                 */
                 if (ratio - 1000 < RTC_CALIB_DURATION_THRESHOLD &&
                         ratio - 1000 > -RTC_CALIB_DURATION_THRESHOLD) {
                     rtc_synch_prediv = rtc_synch_prediv * 1000000 / delta;
@@ -53,6 +61,7 @@ void RTC_WKUP_IRQHandler(void)
                     rtc_calib_valid_count = 0;
                 }
 
+                /* Reset RTC prescaler and tick */
                 RTC_InitTypeDef RTC_InitStruct;
                 RTC_InitStruct.RTC_AsynchPrediv = 128 - 1;
                 RTC_InitStruct.RTC_SynchPrediv = rtc_synch_prediv - 1;
