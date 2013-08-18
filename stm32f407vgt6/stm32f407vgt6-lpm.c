@@ -11,20 +11,26 @@
 #include "lpm.h"
 #include "hwtimer.h"
 
-#define RTC_CALIB_THRESHOLD (3000)
-#define RTC_CALIB_DURATION_THRESHOLD (200)
+#define RTC_AUTO_CALIB
 
 static enum lpm_mode lpm;
 static int lpm_enabled;
-static int lpm_initialized;
 
 static int rtc_synch_prediv = 250;
+
+#ifdef RTC_AUTO_CALIB
+#define RTC_CALIB_THRESHOLD (3000)
+#define RTC_CALIB_DURATION_THRESHOLD (200)
+
+static int lpm_initialized;
 static uint32_t rtc_calib_start_time;
 static uint32_t rtc_calib_valid_count;
+#endif /* RTC_AUTO_CALIB */
 
 void RTC_WKUP_IRQHandler(void)
 {
     if (RTC_GetITStatus(RTC_IT_WUT) != RESET) {
+#ifdef RTC_AUTO_CALIB
         if (!lpm_initialized) {
             uint32_t delta;
             int error;
@@ -65,6 +71,7 @@ void RTC_WKUP_IRQHandler(void)
                 lpm_initialized = 1;
             }
         }
+#endif /* RTC_AUTO_CALIB */
 
         RTC_ClearITPendingBit(RTC_IT_WUT);
         EXTI_ClearITPendingBit(EXTI_Line22);
@@ -102,18 +109,22 @@ void lpm_init(void)
         RTC_WaitForSynchro();
 
         RTC_InitStruct.RTC_AsynchPrediv = 128 - 1;
-        // TODO: Fix synchronized prescaler
         RTC_InitStruct.RTC_SynchPrediv = rtc_synch_prediv - 1;
         RTC_Init(&RTC_InitStruct);
 
+#ifdef RTC_AUTO_CALIB
         rtc_calib_start_time = hwtimer_now();
+#endif /* RTC_AUTO_CALIB */
 
         RTC_WakeUpClockConfig(RTC_WakeUpClock_CK_SPRE_16bits);
         RTC_ITConfig(RTC_IT_WUT, ENABLE);
 
         RTC_WakeUpCmd(DISABLE);
+
+#ifdef RTC_AUTO_CALIB
         RTC_SetWakeUpCounter(0);
         RTC_WakeUpCmd(ENABLE);
+#endif /* RTC_AUTO_CALIB */
 
         lpm_enabled = 1;
     }
@@ -127,7 +138,11 @@ enum lpm_mode lpm_set(enum lpm_mode target)
 
     }
     else if (target == LPM_SLEEP) {
+#ifdef RTC_AUTO_CALIB
         if (lpm_initialized) {
+#else
+        if (lpm_enabled) {
+#endif /* RTC_AUTO_CALIB */
             uint32_t nearest_timer = 0;
             uint32_t now = hwtimer_now();
             uint32_t tmp;
