@@ -32,6 +32,7 @@ void RTC_WKUP_IRQHandler(void)
 {
     if (RTC_GetITStatus(RTC_IT_WUT) != RESET) {
 #ifdef RTC_AUTO_CALIB
+
         /*
          * Sychronize RTC tick with Timer 2 by adjusting Synchronous Prescaler
          * until errors are below RTC_CALIB_THRESHOLD three times in succession.
@@ -53,10 +54,12 @@ void RTC_WKUP_IRQHandler(void)
                  * interrupt handler
                  */
                 if (ratio - 1000 < RTC_CALIB_DURATION_THRESHOLD &&
-                        ratio - 1000 > -RTC_CALIB_DURATION_THRESHOLD) {
+                    ratio - 1000 > -RTC_CALIB_DURATION_THRESHOLD) {
                     rtc_synch_prediv = rtc_synch_prediv * 1000000 / delta;
-                    if (old_rtc_synch_prediv == rtc_synch_prediv)
+
+                    if (old_rtc_synch_prediv == rtc_synch_prediv) {
                         rtc_synch_prediv -= (error > 0 ? 1 : -1);
+                    }
 
                     rtc_calib_valid_count = 0;
                 }
@@ -71,7 +74,7 @@ void RTC_WKUP_IRQHandler(void)
             }
             else if (rtc_calib_valid_count < 2) {
                 if (ratio - 1000 < RTC_CALIB_DURATION_THRESHOLD &&
-                        ratio - 1000 > -RTC_CALIB_DURATION_THRESHOLD) {
+                    ratio - 1000 > -RTC_CALIB_DURATION_THRESHOLD) {
                     rtc_calib_valid_count++;
                 }
             }
@@ -80,6 +83,7 @@ void RTC_WKUP_IRQHandler(void)
                 lpm_initialized = 1;
             }
         }
+
 #endif /* RTC_AUTO_CALIB */
 
         RTC_ClearITPendingBit(RTC_IT_WUT);
@@ -112,7 +116,9 @@ void lpm_init(void)
 
         /* Setup RTC clock */
         RCC_LSICmd(ENABLE);
+
         while (RCC_GetFlagStatus(RCC_FLAG_LSIRDY) == RESET);
+
         RCC_RTCCLKConfig(RCC_RTCCLKSource_LSI);
         RCC_RTCCLKCmd(ENABLE);
         RTC_WaitForSynchro();
@@ -148,8 +154,10 @@ enum lpm_mode lpm_set(enum lpm_mode target)
     }
     else if (target == LPM_SLEEP) {
 #ifdef RTC_AUTO_CALIB
+
         if (lpm_initialized) {
 #else
+
         if (lpm_enabled) {
 #endif /* RTC_AUTO_CALIB */
             uint32_t nearest_timer = 0;
@@ -159,26 +167,34 @@ enum lpm_mode lpm_set(enum lpm_mode target)
             /* Find nearest timer */
             if (TIM2->CCER && TIM_Channel_1) {
                 tmp = TIM2->CCR1 - now;
-                if (!nearest_timer || (nearest_timer && tmp < nearest_timer))
+
+                if (!nearest_timer || (nearest_timer && tmp < nearest_timer)) {
                     nearest_timer = tmp;
+                }
             }
 
             if (TIM2->CCER && TIM_Channel_2) {
                 tmp = TIM2->CCR2 - now;
-                if (!nearest_timer || (nearest_timer && tmp < nearest_timer))
+
+                if (!nearest_timer || (nearest_timer && tmp < nearest_timer)) {
                     nearest_timer = tmp;
+                }
             }
 
             if (TIM2->CCER && TIM_Channel_3) {
                 tmp = TIM2->CCR3 - now;
-                if (!nearest_timer || (nearest_timer && tmp < nearest_timer))
+
+                if (!nearest_timer || (nearest_timer && tmp < nearest_timer)) {
                     nearest_timer = tmp;
+                }
             }
 
             if (TIM2->CCER && TIM_Channel_4) {
                 tmp = TIM2->CCR4 - now;
-                if (!nearest_timer || (nearest_timer && tmp < nearest_timer))
+
+                if (!nearest_timer || (nearest_timer && tmp < nearest_timer)) {
                     nearest_timer = tmp;
+                }
             }
 
             /* Use RTC and deep sleep for long term timer */
@@ -195,10 +211,15 @@ enum lpm_mode lpm_set(enum lpm_mode target)
 
                 /* Recover system clocks */
                 RCC_HSEConfig(RCC_HSE_ON);
+
                 while (RCC_GetFlagStatus(RCC_FLAG_HSERDY) == RESET);
+
                 RCC_PLLCmd(ENABLE);
+
                 while (RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == RESET);
+
                 RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);
+
                 while (RCC_GetSYSCLKSource() != 0x08);
 
                 TIM2->CNT += seconds * 1000000;
