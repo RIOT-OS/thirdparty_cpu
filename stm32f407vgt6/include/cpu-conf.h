@@ -71,6 +71,8 @@ and the mailinglist (subscription via web site)
 #define KERNEL_CONF_STACKSIZE_DEFAULT	2500
 #endif
 
+#define KERNEL_CONF_STACKSIZE_PRINTF	4096
+
 #define KERNEL_CONF_STACKSIZE_IDLE		500
 /** @} */
 
