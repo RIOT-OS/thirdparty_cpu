@@ -43,349 +43,205 @@ and the mailinglist (subscription via web site)
  *
  */
 
+#include "stm32f4xx.h"
 #include "cpu.h"
-//#include "bitarithm.h"
+#include "sched.h"
 #include "hwtimer_cpu.h"
 #include "hwtimer_arch.h"
-//#include "arm_common.h"
 
-//#define VULP(x) ((volatile unsigned long*) (x))
-//
+static uint32_t hwtimer_arch_prescale(uint32_t fcpu, uint32_t ftimer);
+
 ///// High level interrupt handler
 static void (*int_handler)(int);
 
-//Only kept for testing purposes
-//void TIM3_IRQHandler(void) {
-//	TIM_ClearITPendingBit(TIM3, TIM_IT_Update );
-//	if (GPIO_ReadOutputDataBit(GPIOB, GPIO_Pin_1 )) {
-//		GPIO_WriteBit(GPIOB, GPIO_Pin_1, RESET);
-//		puts("i");
-//	} else {
-//		GPIO_WriteBit(GPIOB, GPIO_Pin_1, SET);
-//		puts("a");
-////		USART3_SendString("Test");
-//	}
-//}
+void (*TIM_SetCompare[])(TIM_TypeDef *TIMx, uint32_t Compare1) = {
+    TIM_SetCompare1,
+    TIM_SetCompare2,
+    TIM_SetCompare3,
+    TIM_SetCompare4
+};
 
-#include "sched.h"
+uint16_t TIM_IT_CC[] = {
+    TIM_IT_CC1,
+    TIM_IT_CC2,
+    TIM_IT_CC3,
+    TIM_IT_CC4
+};
 
+uint16_t TIM_Channel_[] = {
+    TIM_Channel_1,
+    TIM_Channel_2,
+    TIM_Channel_3,
+    TIM_Channel_4
+};
 
-__attribute__((naked))
-void TIM3_IRQHandler(void) {
-	save_context();
+void TIM2_IRQHandler(void)
+{
+    int i;
 
-	TIM_ClearITPendingBit(TIM3, TIM_IT_Update );
-//	TIM_Cmd(TIM3, DISABLE);
-	if(!(TIM3->CR1 & TIM_CR1_CEN)){
-		RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, DISABLE);
-		int_handler(0);
-	}
+    for (i = 0; i < ARCH_MAXTIMERS; i++) {
+        if (TIM_GetITStatus(TIM2, TIM_IT_CC[i]) != RESET) {
+            TIM_ClearITPendingBit(TIM2, TIM_IT_CC[i]);
+            TIM_ITConfig(TIM2, TIM_IT_CC[i], DISABLE);
+            TIM_CCxCmd(TIM2, TIM_Channel_[i], TIM_CCx_Disable);
 
-	if(sched_context_switch_request)
-		{
-			// scheduler
-			sched_run();
-		}
+            int_handler(i);
+        }
+    }
 
-	restore_context();
+    if (sched_context_switch_request) {
+        __pendSV();
+    }
 }
 
-__attribute__((naked))
-void TIM4_IRQHandler(void) {
-	save_context();
+static uint32_t hwtimer_arch_prescale(uint32_t fcpu, uint32_t ftimer)
+{
+    switch (RCC->CFGR & RCC_CFGR_HPRE) {
+        case RCC_CFGR_HPRE_DIV512:
+            fcpu >>= 1;
 
-	TIM_ClearITPendingBit(TIM4, TIM_IT_Update );
-//	TIM_Cmd(TIM3, DISABLE);
-	if(!(TIM4->CR1 & TIM_CR1_CEN)){
-		RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, DISABLE);
-		int_handler(1);
-	}
+        case RCC_CFGR_HPRE_DIV256:
+            fcpu >>= 1;
 
-	if(sched_context_switch_request)
-	{
-		// scheduler
-		sched_run();
-	}
+        case RCC_CFGR_HPRE_DIV128:
+            fcpu >>= 1;
 
-	restore_context();
+        case RCC_CFGR_HPRE_DIV64:
+            fcpu >>= 2;
+
+        case RCC_CFGR_HPRE_DIV16:
+            fcpu >>= 1;
+
+        case RCC_CFGR_HPRE_DIV8:
+            fcpu >>= 1;
+
+        case RCC_CFGR_HPRE_DIV4:
+            fcpu >>= 1;
+
+        case RCC_CFGR_HPRE_DIV2:
+            fcpu >>= 1;
+
+        case RCC_CFGR_HPRE_DIV1:
+        default:
+            ;
+    }
+
+    switch (RCC->CFGR & RCC_CFGR_PPRE1) {
+        case RCC_CFGR_PPRE1_DIV16:
+            fcpu >>= 1;
+
+        case RCC_CFGR_PPRE1_DIV8:
+            fcpu >>= 1;
+
+        case RCC_CFGR_PPRE1_DIV4:
+            fcpu >>= 1;
+
+        case RCC_CFGR_PPRE1_DIV2:
+            fcpu >>= 1;
+            fcpu <<= 1; /* (APBx presc = 1) ? x1 : x2 */
+
+        case RCC_CFGR_PPRE1_DIV1:
+        default:
+            ;
+    }
+
+    return fcpu / ftimer;
 }
 
-__attribute__((naked))
-void TIM6_DAC_IRQHandler(void) {
-	save_context();
+void hwtimer_arch_init(void (*handler)(int), uint32_t fcpu)
+{
+    uint32_t cpsr;
 
-	TIM_ClearITPendingBit(TIM6, TIM_IT_Update );
-//	TIM_Cmd(TIM3, DISABLE);
-	if(!(TIM6->CR1 & TIM_CR1_CEN)){
-		RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, DISABLE);
-		int_handler(2);
-	}
+    int_handler = handler;
+    cpsr = hwtimer_arch_prescale(fcpu, HWTIMER_SPEED);
 
-	if(sched_context_switch_request)
-	{
-		// scheduler
-		sched_run();
-	}
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
+    /* Time base configuration */
+    TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
+    TIM_TimeBaseStructure.TIM_Period = HWTIMER_MAXTICKS; // 1 MHz down to 10 KHz (0.1 ms)
+    TIM_TimeBaseStructure.TIM_Prescaler = cpsr - 1; /*1 msec reso*/ //cpsr; // Down to 1 MHz (adjust per your clock)
+    TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;	//not relevant in this case
+    TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+    TIM_TimeBaseStructure.TIM_Period = HWTIMER_MAXTICKS;
+    TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
+    TIM_TimeBaseInit(TIM2, &TIM_TimeBaseStructure);
 
-	restore_context();
-}
+    TIM_OCInitTypeDef TIM_OCInitStruct;
+    TIM_OCInitStruct.TIM_OCMode = TIM_OCMode_Timing;
+    TIM_OCInitStruct.TIM_OutputState = TIM_OutputState_Disable;
+    TIM_OCInitStruct.TIM_Pulse = 0;
+    TIM_OCInitStruct.TIM_OCPolarity = TIM_OCPolarity_High;
+    TIM_OC1Init(TIM2, &TIM_OCInitStruct);
+    TIM_OC2Init(TIM2, &TIM_OCInitStruct);
+    TIM_OC3Init(TIM2, &TIM_OCInitStruct);
+    TIM_OC4Init(TIM2, &TIM_OCInitStruct);
 
-__attribute__((naked))
-void TIM7_IRQHandler(void) {
-	save_context();
+    NVIC_InitTypeDef NVIC_InitStructure;
+    NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x0F;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
+    NVIC_Init(&NVIC_InitStructure);
 
-	TIM_ClearITPendingBit(TIM7, TIM_IT_Update );
-//	TIM_Cmd(TIM3, DISABLE);
-	if(!(TIM7->CR1 & TIM_CR1_CEN)){
-		RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, DISABLE);
-		int_handler(3);
-	}
-
-	if(sched_context_switch_request)
-	{
-		// scheduler
-		sched_run();
-	}
-
-	restore_context();
-}
-
-
-//
-///// Timer 0-3 interrupt handler
-//static void timer_irq(void) __attribute__((interrupt("IRQ")));
-//
-//inline unsigned long get_base_address(short timer) {
-//	return (volatile unsigned long)(TMR0_BASE_ADDR + (timer / 8) * 0x6C000 + (timer/4 - (timer/8)*2) * 0x4000);
-//}
-//
-//static void timer_irq(void)
-//{
-//	short timer = 0;
-//	if (T0IR) {
-//		timer = 0;
-//	} else if (T1IR) {
-//		timer = 4;
-//	} else if (T2IR) {
-//		timer = 8;
-//	}
-//
-//	volatile unsigned long base = get_base_address(timer);
-//
-//    if (*VULP(base+TXIR) & BIT0) {
-//    	*VULP(base+TXMCR) &= ~BIT0;
-//    	*VULP(base+TXIR) = BIT0;
-//		int_handler(timer);
-//	}
-//	if (*VULP(base+TXIR) & BIT1) {
-//		*VULP(base+TXMCR) &= ~BIT3;
-//		*VULP(base+TXIR) = BIT1;
-//		int_handler(timer + 1);
-//	}
-//	if (*VULP(base+TXIR) & BIT2) {
-//		*VULP(base+TXMCR) &= ~BIT6;
-//		*VULP(base+TXIR) = BIT2;
-//		int_handler(timer + 2);
-//	}
-//	if (*VULP(base+TXIR) & BIT3) {
-//		*VULP(base+TXMCR) &= ~BIT9;
-//		*VULP(base+TXIR) = BIT3;
-//		int_handler(timer + 3);
-//	}
-//
-//	VICVectAddr = 0;	// acknowledge interrupt (if using VIC IRQ)
-//}
-
-//This procedure is used for 32-Bit permanent timer
-static void timer2_init(uint32_t cpsr) {
-//	PCONP |= PCTIM0;		// power up timer
-//	T0TCR = 2;				// disable and reset timer
-//	T0MCR = 0;				// disable compare
-//	T0CCR = 0;				// capture is disabled
-//	T0EMR = 0;				// no external match output
-//	T0PR = cpsr;			// set prescaler
-//	install_irq(TIMER0_INT, &timer_irq, 1);
-//	T0TCR = 1;				// reset counter
-	/* TIM2 clock enable */
-	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
-	/* Time base configuration */
-	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
-	//TIM_TimeBaseStructure.TIM_Period = 100 - 1; // 1 MHz down to 10 KHz (0.1 ms)
-	TIM_TimeBaseStructure.TIM_Prescaler = 840 -1; /*1 msec reso*/ //cpsr; // Down to 1 MHz (adjust per your clock)
-	TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;	//not relevant in this case
-	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
-	TIM_TimeBaseStructure.TIM_Period = 0xFFFFFFFF;
-	TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
-	TIM_TimeBaseInit(TIM2, &TIM_TimeBaseStructure);
-	TIM_UpdateRequestConfig(TIM2,TIM_UpdateSource_Regular);
-//	TIM_ITConfig(TIM3,TIM_IT_Update,ENABLE);
-
-	/* TIM2 enable counter */
-	TIM_Cmd(TIM2, ENABLE);
-}
-
-void hwtimer_arch_init(void (*handler)(int), uint32_t fcpu) {
-
- 	uint32_t cpsr;
-	int_handler = handler;
-	//TODO folgende Iimplementierung fehlerhaft:
-	cpu_clock_scale(fcpu, HWTIMER_SPEED, &cpsr);
-	/*only tim2 & tim5 are 32bit */
-//	timer0_init(cpsr);
-//	timer1_init(cpsr);
-	timer2_init(cpsr);		//for hwtimer_now();
-	// hardware timer 3 is used in several projects for special purpose 
-	// timer3_init(cpsr);
-
+    TIM_Cmd(TIM2, ENABLE);
 }
 
 /*---------------------------------------------------------------------------*/
 
-void hwtimer_arch_enable_interrupt(void) {
-	NVIC_InitTypeDef NVIC_InitStructure;
-	// Timer Interrupt konfigurieren
-	NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
-	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x0F;
-	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
-	NVIC_Init(&NVIC_InitStructure);
-	NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
-	NVIC_Init(&NVIC_InitStructure);
-	NVIC_InitStructure.NVIC_IRQChannel = TIM6_DAC_IRQn;
-	NVIC_Init(&NVIC_InitStructure);
-	NVIC_InitStructure.NVIC_IRQChannel = TIM7_IRQn;
-	NVIC_Init(&NVIC_InitStructure);
-//	VICIntEnable = 1 << TIMER0_INT;	/* Enable Interrupt */
-//	VICIntEnable = 1 << TIMER1_INT;	/* Enable Interrupt */
-//	VICIntEnable = 1 << TIMER2_INT;	/* Enable Interrupt */
+void hwtimer_arch_enable_interrupt(void)
+{
+    NVIC_InitTypeDef NVIC_InitStructure;
+    // Timer Interrupt konfigurieren
+    NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x0F;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
+    NVIC_Init(&NVIC_InitStructure);
 }
 
 /*---------------------------------------------------------------------------*/
 
-void hwtimer_arch_disable_interrupt(void) {
-	NVIC_InitTypeDef NVIC_InitStructure;
-	// Timer Interrupt konfigurieren
-	NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
-	NVIC_InitStructure.NVIC_IRQChannelCmd = DISABLE;
-	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x0F;
-	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
-	NVIC_Init(&NVIC_InitStructure);
-	NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
-	NVIC_Init(&NVIC_InitStructure);
-	NVIC_InitStructure.NVIC_IRQChannel = TIM6_DAC_IRQn;
-	NVIC_Init(&NVIC_InitStructure);
-	NVIC_InitStructure.NVIC_IRQChannel = TIM7_IRQn;
-	NVIC_Init(&NVIC_InitStructure);
-//	VICIntEnClr = 1 << TIMER0_INT;	/* Disable Interrupt */
-//	VICIntEnClr = 1 << TIMER1_INT;	/* Disable Interrupt */
-//	VICIntEnClr = 1 << TIMER2_INT;	/* Disable Interrupt */
+void hwtimer_arch_disable_interrupt(void)
+{
+    NVIC_InitTypeDef NVIC_InitStructure;
+    // Timer Interrupt konfigurieren
+    NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = DISABLE;
+    NVIC_Init(&NVIC_InitStructure);
 }
 
 /*---------------------------------------------------------------------------*/
 
-void hwtimer_arch_set(unsigned long offset, short timer) {
-	offset *= 10;	// due to compatibilty input is a count of 10us, so change it to 1us for calculation
-	/* TIMER clock enable - we have TIM2 to TIM7, because the other make use of APB2
-	 * TIM2 and TIM5 are 32-Bit */
-	switch(timer){
-		case 0: RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);break;
-		case 1: RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);break;
-		case 2: RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);break;
-		case 3: RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, ENABLE);break;
-	}
-
-	/* Time base configuration */
-	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
-	//TIM_TimeBaseStructure.TIM_Period = 100 - 1; // 1 MHz down to 10 KHz (0.1 ms)
-	TIM_TimeBaseStructure.TIM_Prescaler = offset*84 / 0xFFFF +1; /*1 msec reso*/ //cpsr; // Down to 1 MHz (adjust per your clock)
-	TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;	//not relevant in this case
-	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
-	TIM_TimeBaseStructure.TIM_Period = offset*84/TIM_TimeBaseStructure.TIM_Prescaler;;
-	TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
-	switch(timer){
-		case 0: {
-			TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
-			TIM_SelectOnePulseMode(TIM3,TIM_OPMode_Single);
-			TIM_ITConfig(TIM3,TIM_IT_Update,ENABLE);
-			/* enable counter */
-			TIM_Cmd(TIM3, ENABLE);
-			break;
-		}
-		case 1: {
-			TIM_TimeBaseInit(TIM4, &TIM_TimeBaseStructure);
-			TIM_SelectOnePulseMode(TIM4,TIM_OPMode_Single);
-			TIM_ITConfig(TIM4,TIM_IT_Update,ENABLE);
-			/* enable counter */
-			TIM_Cmd(TIM4, ENABLE);
-			break;
-		}
-		case 2: {
-			TIM_TimeBaseInit(TIM6, &TIM_TimeBaseStructure);
-			TIM_SelectOnePulseMode(TIM6,TIM_OPMode_Single);
-			TIM_ITConfig(TIM6,TIM_IT_Update,ENABLE);
-			/* enable counter */
-			TIM_Cmd(TIM6, ENABLE);
-			break;
-		}
-		case 3: {
-			TIM_TimeBaseInit(TIM7, &TIM_TimeBaseStructure);
-			TIM_SelectOnePulseMode(TIM7,TIM_OPMode_Single);
-			TIM_ITConfig(TIM7,TIM_IT_Update,ENABLE);
-			/* enable counter */
-			TIM_Cmd(TIM7, ENABLE);
-			break;
-		}
-	}
-
-
-	// Calculate base address of timer register
-	// Timer 0-3 are matched to TIMER0
-	// Timer 4-7 are matched to TIMER1
-	// Timer 8-11 are matched to TIMER2
-/*	volatile unsigned long base = get_base_address(timer);
-	// Calculate match register address of corresponding timer
-	timer %= 4;
-	unsigned long cpsr = disableIRQ();
-	volatile unsigned long* addr = VULP(base + TXMR0 + 4 * timer);
-	// Calculate match register value
-	unsigned long value = *VULP(base + TXTC) + offset;
-	*addr = value;									// set match register
-	*VULP(base+TXIR) = 0x01 << timer;				// reset interrupt register value for corresponding match register
-	*VULP(base+TXMCR) &= ~(7 << (3 * timer));		// Clear all bits
-	*VULP(base+TXMCR) |= (MR0I << (3 * timer));		// enable interrupt for match register
-	restoreIRQ(cpsr);*/
+void hwtimer_arch_set(unsigned long offset, short timer)
+{
+    hwtimer_arch_set_absolute(offset + TIM_GetCounter(TIM2), timer);
 }
 
 /*---------------------------------------------------------------------------*/
 
-void hwtimer_arch_unset(short timer) {
-	switch (timer) {
-		case 0: {
-			RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, DISABLE);
-			break;
-		}
-		case 1: {
-			RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, DISABLE);
-			break;
-		}
-		case 2: {
-			RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, DISABLE);
-			break;
-		}
-		case 3: {
-			RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, DISABLE);
-			break;
-		}
-	}
-/*	volatile unsigned long base = get_base_address(timer);
-	timer %= 4;
-	*VULP(base+TXMCR) &= ~(MR0I << (3 * timer));	// disable interrupt for match register
-	 *VULP(base+TXIR) = 0x01 << timer;				// reset interrupt register value for corresponding match register
-	 *VULP(base+TXIR) */
+void hwtimer_arch_set_absolute(unsigned long value, short timer)
+{
+    TIM_SetCompare[timer](TIM2, value);
+    TIM_ITConfig(TIM2, TIM_IT_CC[timer], ENABLE);
+    TIM_CCxCmd(TIM2, TIM_Channel_[timer], TIM_CCx_Enable);
 }
 
 /*---------------------------------------------------------------------------*/
 
-unsigned long hwtimer_arch_now(void) {
-	return TIM_GetCounter(TIM2);
+void hwtimer_arch_unset(short timer)
+{
+    TIM_ITConfig(TIM2, TIM_IT_CC[timer], DISABLE);
+    TIM_CCxCmd(TIM2, TIM_Channel_[timer], TIM_CCx_Disable);
+}
+
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief   Return hardware timer absolute tick count.
+ *
+ * @return  Hardware timer absolute tick count.
+ */
+unsigned long hwtimer_arch_now(void)
+{
+    return TIM_GetCounter(TIM2);
 }

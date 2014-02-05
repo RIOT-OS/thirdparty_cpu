@@ -1,0 +1,4 @@
+ifeq ($(CPU),stm32f407vgt6)
+  export USEMODULE += stm32f4xxstdperi
+  export UNDEF += $(BINDIR)syscalls.o
+endif
