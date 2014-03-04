@@ -17,21 +17,23 @@ unsigned int disableIRQ(void)
 {
 	// FIXME PRIMASK is the old CPSR (FAULTMASK ??? BASEPRI ???)
 	//PRIMASK lesen
-	unsigned int uiPriMask = __get_PRIMASK();
+	//unsigned int uiPriMask = __get_PRIMASK();
 	__disable_irq();
-	return uiPriMask;
+	//return uiPriMask;
 }
 
 void restoreIRQ(unsigned oldPRIMASK)
 {
 	//PRIMASK lesen setzen
-	 __set_PRIMASK(oldPRIMASK);
+	// __set_PRIMASK(oldPRIMASK);
+  __enable_irq();
 }
 
 
 __attribute__((naked))
 void HardFault_Handler(void) {
   puts("HARD FAULT");
+  printf("CFSR : %x\n", SCB->CFSR);
   while(1);
 }
 

@@ -85,6 +85,7 @@ __attribute__( ( always_inline ) ) __INLINE void restore_context(void)
 	asm("pop		{r4-r11}");
 	/* load unloaded register */
 //	asm("pop 		{r4}"); /*foo*/
+  asm("orr  r0, #1");
 	asm("bx		r0");				/* load exception return value to pc causes end of exception*/
 							/* {r0-r3,r12,LR,PC,xPSR} are restored automatically on exception return */
 }
