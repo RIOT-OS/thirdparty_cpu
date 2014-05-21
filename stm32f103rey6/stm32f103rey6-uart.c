@@ -52,3 +52,15 @@ __attribute__ ((naked)) void USART1_IRQHandler(void)
 
     interrupt_return();
 }
+
+int fw_puts(char *astring, int length)
+{
+    for (int i = 0; i < length; i++) {
+        USART_SendData(USART1, astring[i]);
+
+        /* Loop until the end of transmission */
+        while (USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET) {}
+    }
+
+    return length;
+}
