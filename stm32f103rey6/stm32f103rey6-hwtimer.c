@@ -23,7 +23,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "hwtimer_arch.h"
+#include "arch/hwtimer_arch.h"
 #include "board.h"
 #include "timer.h"
 #include "thread.h"

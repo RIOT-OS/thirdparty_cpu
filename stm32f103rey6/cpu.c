@@ -172,46 +172,40 @@ void sched_task_return(void)
  *
  *
  */
-char *thread_stack_init(void *task_func, void *stack_start, int stack_size)
+char *thread_stack_init(void *(*task_func)(void *), void *arg, void *stack_start, int stack_size)
 {
-    unsigned int *stk;
-    stk = (unsigned int *)(stack_start + stack_size);
+    uint32_t *stk;
+    stk = (uint32_t *)(stack_start + stack_size);
 
     /* marker */
     stk--;
-    *stk = 0x77777777;
+    *stk = (uint32_t)0x77777777;
 
-    //FIXME FPSCR
+    /* FIXME xPSR */
     stk--;
-    *stk = (unsigned int) 0;
+    *stk = (uint32_t)0x01000200;
 
-    //S0 - S15
-    for (int i = 15; i >= 0; i--) {
-        stk--;
-        *stk = i;
-    }
-
-    //FIXME xPSR
+    /* program counter */
     stk--;
-    *stk = (unsigned int) 0x01000200;
+    *stk = (uint32_t)task_func;
 
-    //program counter
+    /* link register, jumped to when thread exits */
     stk--;
-    *stk = (unsigned int) task_func;
-
-    /* link register */
-    stk--;
-    *stk = (unsigned int) sched_task_exit;
+    *stk = (uint32_t)sched_task_exit;
 
     /* r12 */
     stk--;
-    *stk = (unsigned int) 0;
+    *stk = (uint32_t) 0;
 
-    /* r0 - r3 */
-    for (int i = 3; i >= 0; i--) {
+    /* r1 - r3 */
+    for (int i = 3; i >= 1; i--) {
         stk--;
         *stk = i;
     }
+
+    /* r0 -> thread function parameter */
+    stk--;
+    *stk = (unsigned int) arg;
 
     /* r11 - r4 */
     for (int i = 11; i >= 4; i--) {
@@ -219,13 +213,9 @@ char *thread_stack_init(void *task_func, void *stack_start, int stack_size)
         *stk = i;
     }
 
-    /* foo */
-    /*stk--;
-    *stk = (unsigned int) 0xDEADBEEF;*/
-
-    /* lr means exception return code  */
+    /* put LR to trigger return to thread stack pointer */
     stk--;
-    *stk = (unsigned int) 0xfffffffd; // return to taskmode main stack pointer
+    *stk = (uint32_t)0xfffffffd;
 
-    return (char *) stk;
+    return (char*) stk;
 }
